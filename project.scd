@@ -45,9 +45,9 @@ SynthDef(\burstFreq, {|out = 2, min = 10, max = 500, t = 0|
 	Out.kr(out,
 		LFNoise0.kr(
 			freq: t.linlin(0,1,min,max) * 0.5,
-			mul: 4,
-			add: t.linlin(0,1,min,max)
-		)
+			mul: t.linlin(0.1,1,4,8),
+			add: t.linlin(0,1,min,max).poll
+		).poll
 	)
 }).add;
 
@@ -59,37 +59,35 @@ SynthDef(\engine, {|out = 0, trigger = 0, freq = 20, brownWhite = 0|
 	Out.ar(out,
 		Array.fill(2, {
 			Pluck.ar(
-				in: EnvGen.ar(
-					envelope: Env.perc,
-					gate: Impulse.ar(freq: freq+1),
-					doneAction: 0,
-					timeScale: (freq+1).reciprocal
-				) * Mix.ar([
-					Pulse.ar(
-						freq: freq+1,
-						width: SinOsc.ar(0.75*(freq+1)).range(0.01,0.99)
-						mul: 0.2 * (1.0 - brownWhite),
-
+				in: Mix.ar([
+					EnvGen.ar(
+						envelope: Env.perc,
+						gate: Impulse.ar(freq: freq * 4),
+						doneAction: 0,
+						timeScale: (freq / 2).reciprocal
+					) *
+					SinOsc.ar(
+						freq: freq,
+						mul: SinOsc.ar(0.5 * freq).range(0.01,0.99) * 0.2 * (1.0 - brownWhite)
 					),
+					EnvGen.ar(
+						envelope: Env.perc,
+						gate: Impulse.ar(freq: freq),
+						doneAction: 0,
+						timeScale: (freq).reciprocal
+					) *
 					LPF.ar(WhiteNoise.ar, 5000, mul: 1 * brownWhite)//WhiteNoise.ar(mul: 1 * brownWhite)
 				]),
-				trig: Impulse.ar(freq: freq),
+				trig: SinOsc.ar(freq: freq),
 				delaytime: (freq + 1).reciprocal,
-				maxdelaytime: (freq + 1).reciprocal,
-				decaytime: 0.5,
-				coef:  MouseY.kr(-0.28, 0.5)
+				maxdelaytime: (freq+1).reciprocal,
+	 			decaytime: 0.5,
+				coef:  MouseX.kr(0, 0.4)
 			)
 		})
 	)
 }).add;
 )
-
-{ Pulse.ar(200, SinOsc.ar(150).range(0.01, 0.99), 0.2) }.play;
-
-{ MouseX.kr(0,1).linexp(0,1,0.1,1.1) - 0.1 }.scope
-
-{ BrownNoise.ar }.play;
-{ LPF.ar(WhiteNoise.ar, MouseX.kr(0,22050).poll, mul: MouseX.kr(1,0.1, 'exponential')) }.freqscope
 
 // TEST
 (
@@ -102,6 +100,10 @@ brownWhite.map(\t, ~t);
 engine = Synth(\engine, [\f, 0]);
 engine.map(\freq, ~freq);
 engine.map(\brownWhite, ~brownWhite);
+)
+
+(
+
 )
 
 // Create Synths and map busses
