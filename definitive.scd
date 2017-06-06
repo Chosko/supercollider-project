@@ -17,7 +17,9 @@ Run everything (it's a single block):
 (
 /***** Local variables *****/
 // Sound variables
-var updateTime, tSynth, burstFreq, engine, lowHigh, t, accel, filtered, brown, saw, gear;
+var updateTime, tSynth, burstFreq,
+engine, lowHigh, t, accel, filtered,
+brown, saw, gear, modulatedPulse, tOffset;
 // GUI variables
 var window, igniteBtn, rpmKnob, accelSlider,
 accelZeroLabel, accelLabel, brakeLabel, curGearLabel,
@@ -31,11 +33,12 @@ var accelScale = 0;
 ~initRoutine = Routine.new({
 
 	s.boot;
-	3.wait; // Wait for the server to boot
+	1.wait; // Wait for the server to boot
 
 	/***** Busses *****/
 	~saw = Bus.audio(s, 2);       // A channel with a sawtooth signal with percussive envelope
 	~brown = Bus.audio(s, 2);     // A brown noise enveloped percussively
+	~modulatedPulse = Bus.audio(s, 2);  // An amplitude modulated pulse
 	~filtered = Bus.audio(s, 2);  // A Low Pass filtered white noise enveloped percussively
 	~t = Bus.control(s, 2);       // RPM of the engine, normalized in the interval [0,1]
 	~lowHigh = Bus.control(s, 1); // Parameter in [0,1], used to mix sounds between low and high RPM synthesis
@@ -50,6 +53,7 @@ var accelScale = 0;
 		Out.kr(out, t);
 	}).add;
 
+
 	// Generate a control signal that represents the absolute frequency of the engine bursts
 	// -- ARGS --
 	// out: the output bus
@@ -58,7 +62,7 @@ var accelScale = 0;
 	// t: a [0,1] paramter used to lerp from 'min' to 'max'
 	SynthDef(\burstFreq, {|out = 2, min = 10, max = 500, t = 0|
 		Out.kr(out,
-			LFNoise0.kr( // The output is perturbed with a low frequency noise
+			LFNoise0.kr( // The output is perturbed with a low frequency noise, to achieve irregular burst frequency
 				add: t.linlin(0,1,min,max),        // Start from the expected frequency
 				mul: t.linlin(0.1,1,4,8),          // The frequency affects the amount of perturbation
 				freq: t.linlin(0,1,min,max) * 0.25 // Update the noise a quarter times the burst frequency
@@ -89,15 +93,31 @@ var accelScale = 0;
 		}))
 	}).add;
 
+	SynthDef(\modulatedPulse, { |out=0, freq = 20|
+		var sig = SinOsc.ar(freq);
+		Out.ar(
+			out,
+			EnvGen.ar(
+				envelope: Env.perc,
+				gate: Impulse.ar(freq: freq*2),
+				doneAction: 0,
+				timeScale: (freq*2).reciprocal
+			) *
+			(sig.pow(100/freq) - 0.7).clip(0,1) * 10 *
+			LPF.ar(Pulse.ar(freq*2), freq*6, mul: 3) *
+			SinOsc.ar(freq * 0.66).unipolar;
+		);
+	}).add;
+
 	SynthDef(\brownNoise, {|out = 0, freq = 2|
 		Out.ar(out, Array.fill(2, {
 			EnvGen.ar(
 				envelope: Env.perc,
 				gate: Impulse.ar(freq: freq),
 				doneAction: 0,
-				timeScale: (freq).reciprocal
+				timeScale: (freq*4).reciprocal
 			) *
-			BrownNoise.ar
+			LPF.ar(BrownNoise.ar,4000)
 		}))
 
 	}).add;
@@ -114,19 +134,57 @@ var accelScale = 0;
 		}))
 	}).add;
 
-	SynthDef(\engine, {|out = 0, freq = 20, lowBus=2, highBus=2, lowHigh = 0|
+	SynthDef(\engine, {|out = 0, freq = 20, lowBus=2, highBus=2, lowHigh = 0, lowVol=1, highVol=1, volume=1|
 		Out.ar(out,
-			Pluck.ar(
-				in: Mix.ar([
-					In.ar(lowBus, 1) * (1.0 - lowHigh) * [0.1, 0.1],
-					In.ar(highBus, 2) * lowHigh * 0.5
-				]),
-				trig: SinOsc.ar(freq: freq),
-				delaytime: (freq + 1).reciprocal,
-				maxdelaytime: (freq+1).reciprocal,
-				decaytime: 0.5,
-				coef:  MouseX.kr(0, 0.4)
-			)
+			Mix.ar([
+				In.ar(lowBus, 1) * (1.0 - lowHigh) * [lowVol,lowVol],
+				Pluck.ar(
+					in: In.ar(highBus, 2),
+					trig: SinOsc.ar(freq: freq),
+					delaytime: (freq + 1).reciprocal,
+					maxdelaytime: (freq+1).reciprocal,
+					decaytime: 0.5,
+					coef:  MouseX.kr(0, 0.4),
+					mul: lowHigh * highVol
+				)
+			]) * volume;
+		)
+	}).add;
+
+	SynthDef(\ignition, {|out=0, cFreq=600, amFreq=100, fmFreq=7, fmAmp=100, signalAmount=0.5, noiseAmount=0.5, volume=1|
+		Out.ar(out,
+			Mix(
+				[
+					Mix.fill(7, {|x|
+						LPF.ar(
+							in: Saw.ar(
+								freq: cFreq * ((x+1) * 0.95) +
+								LPF.ar(
+									in: Saw.ar(freq: fmFreq) * -1,
+									freq: fmFreq,
+									mul: fmAmp
+								),
+								mul: 0.4 / (2+(x*x*x*x))
+							) * SinOsc.ar(amFreq, mul: 1).unipolar,
+							freq: cFreq,
+							mul: 10 * signalAmount
+						)
+					}),
+					BPF.ar(
+						in: WhiteNoise.ar(mul: 5),
+						freq: (2*cFreq) + (
+							LPF.ar(
+								in: Saw.ar(freq: fmFreq) * -1,
+								freq: fmFreq,
+								mul: 4*fmAmp
+							)
+						),
+						rq: 50.reciprocal,
+						mul: 2 * noiseAmount
+					)
+				]
+			) *
+			[volume,volume]
 		)
 	}).add;
 
@@ -153,9 +211,11 @@ var accelScale = 0;
 	saw.map(\freq, ~freq);
 	brown = Synth(\brownNoise, [\out, ~brown]);
 	brown.map(\freq, ~freq);
+	modulatedPulse = Synth(\modulatedPulse, [\out, ~modulatedPulse]);
+	modulatedPulse.map(\freq, ~freq);
 	filtered = Synth(\filteredNoise, [\out, ~filtered]);
 	filtered.map(\freq, ~freq);
-	engine = Synth(\engine, [\lowBus, ~brown, \highBus, ~brown], addAction:\addToTail);
+	engine = Synth(\engine, [\lowBus, ~brown, \highBus, ~brown, \volume, 0], addAction:\addToTail);
 	engine.map(\freq, ~freq);
 	engine.map(\lowHigh, ~lowHigh);
 };
@@ -214,6 +274,8 @@ var accelScale = 0;
 			~formula1.value;
 			~updateLoop.reset;
 			~updateLoop.play(SystemClock);
+			~ignition.reset;
+			~ignition.play(TempoClock);
 		});
 	};
 };
@@ -233,6 +295,8 @@ var accelScale = 0;
 			~harley.value;
 			~updateLoop.reset;
 			~updateLoop.play(SystemClock);
+			~ignition.reset;
+			~ignition.play(TempoClock);
 		});
 	};
 };
@@ -245,7 +309,8 @@ var accelScale = 0;
 	]);
 
 	// RPM
-	rpmKnob = Knob(window, Rect(w/2 - 100, h/2 - 70, 200, 200));
+	rpmKnob = Knob(window, Rect(w/2 - 100, h/2 - 70, 200, 200))
+	.color_([Color.black, Color.white, Color.white, Color.white]);
 
 
 	// Acceleration slider
@@ -358,22 +423,67 @@ var accelScale = 0;
 ~formula1 = {
 	burstFreq.set(\min, 1500 / 60); // min 1500 rpm
 	burstFreq.set(\max, 2 * 18000 / 60); // max 18000 rpm
-	lowHigh.set(\min, 0.4);
-	lowHigh.set(\max, 1);
+	lowHigh.set(\min, 0.3);
+	lowHigh.set(\max, 2);
 	engine.set(\lowBus, ~saw);
 	engine.set(\highBus, ~filtered);
+	engine.set(\lowVol, 0.3);
+	engine.set(\highVol, 1);
+	engine.set(\volume, 0);
+	tOffset = 0.1;
 };
 
 // Set formula1 parameters and synths
 ~harley = {
-	burstFreq.set(\min, 700 / 60); // min 1000 rpm
+	burstFreq.set(\min, 2 * 1000 / 60); // min 1000 rpm
 	burstFreq.set(\max,  2 * 8000 / 60); // max 8000 rpm
-	lowHigh.set(\min, 0.4);
-	lowHigh.set(\max, 1);
-	engine.set(\lowBus, ~brown);
+	lowHigh.set(\min, 0.2);
+	lowHigh.set(\max, 2);
+	engine.set(\lowBus, ~modulatedPulse);
 	engine.set(\highBus, ~brown);
+	engine.set(\lowVol, 0.7);
+	engine.set(\highVol, 0.1);
+	engine.set(\volume, 0);
+	tOffset = 0.3;
 };
 
+~ignition = Routine.new({
+	var updateInterval = 0.01;
+	var ignitionDuration = 1 + 1.rand;
+	var ignitionVolume = 0.4;
+	var engineDuration = 0.3;
+	var engineDelay = ignitionDuration - engineDuration;
+	var engineSteps = engineDuration/updateInterval;
+	var tDuration = 1.2;
+	var tSteps = tDuration/updateInterval;
+
+	var ignition = Synth(\ignition, [
+		\out, 0,
+		\cFreq, 600,
+		\amFreq, 100,
+		\fmFreq, 7,
+		\fmAmp, 100,
+		\signalAmount, 0.1,
+		\noiseAmount, 0.8,
+		\volume, ignitionVolume
+	]);
+
+	engine.set(\volume, 0);
+
+	engineDelay.wait;
+	engineSteps.do {|x|
+		engine.set(\volume, (x+1)/engineSteps);
+		t = tOffset * (x+1)/engineSteps;
+		updateInterval.wait;
+	};
+	ignition.set(\volume, 0);
+	ignition.free;
+
+	tSteps.do {|x|
+		t = tOffset * (tSteps-x+1)/tSteps;
+		updateInterval.wait;
+	}
+});
 
 // Main update loop
 ~updateLoop = Routine.new({
@@ -395,7 +505,7 @@ var accelScale = 0;
 
 // GUI
 ~initializeGUI = Routine.new({
-	var screen, stethoscope;
+	var screen, stethoscope, freqscope;
 
 	/*** GUI creation ***/
 
@@ -414,6 +524,7 @@ var accelScale = 0;
 		~updateLoop.reset;
 		~releaseEngine.value;
 		stethoscope.free;
+		freqscope.free;
 		s.freeAll;
 		s.quit;
 	};
