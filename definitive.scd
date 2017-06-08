@@ -6,15 +6,15 @@ Author: Ruben Caliandro
 
 DESCRIPTION
 
-This Project simulates two vehicle engines.
+This Project simulates two vehicles engines.
 In the main menu you can choose between a formula1 vehicle, or a bike.
 After you choose, you can ignite the engine, and then you are allowed to
 accelerate, brake and change gears.
 
 USAGE
 
-The code is written in a single block. Just run it at once. The code will boot
-the server if needed.
+The code is written in a single block. Just run it at once.
+The code will already boot the server if needed.
 */
 
 // Run This
@@ -247,7 +247,7 @@ var h = 768;  // Height of the window in pixels
 		var fmod = {|freq, amp|  // The amplitude of the FM
 			LPF.ar( // Low-pass the signal to achieve a smoother FM
 				in: Saw.ar(freq: freq) * -1,
-				freq: freq,
+				freq: freq * 2,
 				mul: amp
 			)
 		};
@@ -272,7 +272,7 @@ var h = 768;  // Height of the window in pixels
 					// This second signal is made with subtractive synthesis, starting from a white noise
 					BPF.ar( // Band Pass Filter is actually used to apply a sort of FM to the noise
 						in: WhiteNoise.ar(mul: 5),                 // Should I really comment this line? come on....
-						freq: (2*cFreq) + fmod.(fmFreq, fmAmp * 4),// Filter at double the carrier frequency, then FM! (vibrato)
+						freq: (2*cFreq) + fmod.(fmFreq, fmAmp * 2),// Filter at double the carrier frequency, then FM! (vibrato)
 						rq: 50.reciprocal,                         // bandwidth/cutoff is 1/50
 						mul: 2 * noiseAmount                       // Adjust volume
 					)
@@ -554,7 +554,7 @@ var h = 768;  // Height of the window in pixels
 ~ignition = Routine.new({
 	var updateInterval = 0.01;
 	var ignitionDuration = 1 + 1.rand;
-	var ignitionVolume = 0.4;
+	var ignitionVolume = 0.5;
 	var engineDuration = 0.3;
 	var engineDelay = ignitionDuration - engineDuration;
 	var engineSteps = engineDuration/updateInterval;
@@ -566,9 +566,9 @@ var h = 768;  // Height of the window in pixels
 		\cFreq, 600,
 		\amFreq, 100,
 		\fmFreq, 7,
-		\fmAmp, 100,
-		\signalAmount, 0.1,
-		\noiseAmount, 0.8,
+		\fmAmp, 200,
+		\signalAmount, 0.5,
+		\noiseAmount, 0.5,
 		\volume, ignitionVolume
 	]);
 
